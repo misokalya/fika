@@ -2,7 +2,7 @@ fastapi
 uvicorn[standard]
 sqlalchemy
 psycopg[binary]
-geoalchemy2
+geoalchemy2[shapely]
 alembic
 pydantic-settings
 python-dotenv
