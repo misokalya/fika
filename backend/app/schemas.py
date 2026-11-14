@@ -173,3 +173,61 @@ class StopResponse(BaseSchema):
     is_active: bool
     created_at: datetime
 
+
+
+class RouteStopCreate(BaseSchema):
+    stop_id: int = Field(gt=0)
+    sequence: int = Field(gt=0)
+    destination_board: str | None = Field(default=None, max_length=150)
+
+
+class RouteStopUpdate(BaseSchema):
+    sequence: int | None = Field(default=None, gt=0)
+    destination_board: str | None = Field(default=None, max_length=150)
+
+
+class RouteStopResponse(BaseSchema):
+    id: int
+    route_id: int
+    stop_id: int
+    sequence: int
+    destination_board: str | None
+
+
+class TransferCreate(BaseSchema):
+    from_route_id: int = Field(gt=0)
+    to_route_id: int = Field(gt=0)
+    from_stop_id: int = Field(gt=0)
+    to_stop_id: int = Field(gt=0)
+
+    walking_distance_m: float | None = Field(default=None, ge=0)
+    is_verified: bool = False
+    notes: str | None = None
+
+    @model_validator(mode="after")
+    def validate_different_routes(self):
+        if self.from_route_id == self.to_route_id:
+            raise ValueError("A transfer must connect two different routes")
+        return self
+
+
+class TransferUpdate(BaseSchema):
+    from_route_id: int | None = Field(default=None, gt=0)
+    to_route_id: int | None = Field(default=None, gt=0)
+    from_stop_id: int | None = Field(default=None, gt=0)
+    to_stop_id: int | None = Field(default=None, gt=0)
+
+    walking_distance_m: float | None = Field(default=None, ge=0)
+    is_verified: bool | None = None
+    notes: str | None = None
+
+
+class TransferResponse(BaseSchema):
+    id: int
+    from_route_id: int
+    to_route_id: int
+    from_stop_id: int
+    to_stop_id: int
+    walking_distance_m: float | None
+    is_verified: bool
+    notes: str | None

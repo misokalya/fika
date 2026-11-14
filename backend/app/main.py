@@ -4,6 +4,8 @@ from sqlalchemy import text
 from app.database import engine
 from app.routers import routes
 from app.routers import stops
+from app.routers import route_stops
+from app.routers import transfers
 
 app = FastAPI(
     title="FIKA API",
@@ -13,6 +15,8 @@ app = FastAPI(
 
 app.include_router(routes.router)
 app.include_router(stops.router)
+app.include_router(route_stops.router)
+app.include_router(transfers.router)
 
 @app.get("/")
 def root():
