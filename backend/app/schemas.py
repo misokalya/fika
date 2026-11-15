@@ -10,6 +10,8 @@ from pydantic import (
     model_validator,
 )
 
+from typing import Annotated, Any
+
 
 # --------------------------------------------------
 # Shared configuration
@@ -231,3 +233,27 @@ class TransferResponse(BaseSchema):
     walking_distance_m: float | None
     is_verified: bool
     notes: str | None
+
+# --------------------------------------------------
+# JOURNEY SCHEMAS
+# --------------------------------------------------
+
+class JourneyPlanRequest(BaseSchema):
+    origin_stop_id: int = Field(gt=0)
+    destination_stop_id: int = Field(gt=0)
+    include_unverified_transfers: bool = False
+
+    @model_validator(mode="after")
+    def validate_different_stops(self):
+        if self.origin_stop_id == self.destination_stop_id:
+            raise ValueError("Origin and destination stops must be different.")
+        return self
+
+
+class JourneyPlanResponse(BaseSchema):
+    status: str
+    origin_stop_id: int
+    destination_stop_id: int
+    include_unverified_transfers: bool
+    path: dict[str, Any]
+    instructions: dict[str, Any]
