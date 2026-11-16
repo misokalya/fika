@@ -12,6 +12,12 @@ from app.services.transit.pathfinder import (
     TransitPathNotFoundError,
 )
 from app.services.transit.instructions import generate_journey_instructions
+from app.services.journey.planner import plan_coordinate_journey
+from app.schemas import (
+    JourneyPlanRequest,
+    JourneyPlanResponse,
+    CoordinateJourneyPlanRequest,
+)
 
 
 router = APIRouter(
@@ -87,3 +93,32 @@ def plan_journey(
         "path": path_result,
         "instructions": instructions,
     }
+
+
+@router.post("/plan-coordinates")
+async def plan_coordinates(
+    request: CoordinateJourneyPlanRequest,
+    db: Session = Depends(get_db),
+):
+    origin = (
+        request.origin_longitude,
+        request.origin_latitude,
+    )
+
+    destination = (
+        request.destination_longitude,
+        request.destination_latitude,
+    )
+
+    result = await plan_coordinate_journey(
+        db=db,
+        origin=origin,
+        destination=destination,
+        radius_m=request.radius_m,
+        candidate_limit=request.candidate_limit,
+        include_unverified_transfers=(
+            request.include_unverified_transfers
+        ),
+    )
+
+    return result

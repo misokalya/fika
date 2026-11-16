@@ -257,3 +257,21 @@ class JourneyPlanResponse(BaseSchema):
     include_unverified_transfers: bool
     path: dict[str, Any]
     instructions: dict[str, Any]
+
+
+class CoordinateJourneyPlanRequest(BaseSchema):
+    origin_longitude: float = Field(
+        ge=-180, le=180, allow_inf_nan=False
+    )
+    origin_latitude: float = Field(
+        ge=-90, le=90, allow_inf_nan=False
+    )
+    destination_longitude: float = Field(
+        ge=-180, le=180, allow_inf_nan=False
+    )
+    destination_latitude: float = Field(
+        ge=-90, le=90, allow_inf_nan=False
+    )
+    radius_m: float = Field(default=2000, gt=0, le=5000)
+    candidate_limit: int = Field(default=10, ge=1, le=50)
+    include_unverified_transfers: bool = False
