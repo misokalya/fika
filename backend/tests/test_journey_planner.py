@@ -495,3 +495,95 @@ async def test_transfer_routing_failure_preserves_recorded_distance(
         journey["metrics"]["total_walking_duration_seconds"]
         is None
     )
+
+
+@pytest.mark.anyio
+async def test_successful_transfer_routing_uses_routed_distance(
+    monkeypatch,
+    sample_stops,
+):
+    boarding, alighting = sample_stops
+
+    async def fake_access_routes(**kwargs):
+        return [boarding]
+
+    def fake_nearby_stops(**kwargs):
+        return [alighting]
+
+    def fake_build_graph(db, verified_transfers_only=True):
+        graph = nx.MultiDiGraph()
+
+        graph.add_node(1, longitude=36.8219, latitude=-3.3869)
+        graph.add_node(2, longitude=36.825, latitude=-3.390)
+        graph.add_node(3, longitude=36.826, latitude=-3.391)
+
+        return graph
+
+    def fake_find_path(graph, origin_id, destination_id):
+        return {
+            "origin_stop_id": origin_id,
+            "destination_stop_id": destination_id,
+            "stops": [1, 2, 3],
+            "connections": [
+                {
+                    "kind": "ride",
+                    "from_stop_id": 1,
+                    "to_stop_id": 2,
+                },
+                {
+                    "kind": "transfer",
+                    "from_stop_id": 2,
+                    "to_stop_id": 3,
+                    "transfer_id": 12,
+                    "walking_distance_m": 250,
+                },
+            ],
+            "total_connections": 2,
+            "ride_connections": 1,
+            "transfer_connections": 1,
+        }
+
+    monkeypatch.setattr(
+        planner, "find_walking_access_routes", fake_access_routes
+    )
+    monkeypatch.setattr(
+        planner, "find_nearby_stops", fake_nearby_stops
+    )
+    monkeypatch.setattr(
+        planner, "build_transit_graph", fake_build_graph
+    )
+    monkeypatch.setattr(
+        planner, "find_transit_path", fake_find_path
+    )
+    monkeypatch.setattr(
+        planner,
+        "generate_journey_instructions",
+        lambda graph, path: {"steps": []},
+    )
+    monkeypatch.setattr(
+        planner, "ValhallaProvider", FakeValhallaProvider
+    )
+
+    result = await planner.plan_coordinate_journey(
+        db=None,
+        origin=(36.8219, -3.3869),
+        destination=(36.825, -3.390),
+        include_unverified_transfers=True,
+    )
+
+    assert result["status"] == "success"
+
+    journey = result["journeys"][0]
+    transfer = journey["transfer_walks"][0]
+
+    assert transfer["transfer_id"] == 12
+    assert transfer["recorded_distance_m"] == 250
+    assert transfer["routed_distance_m"] == 500
+    assert transfer["effective_distance_m"] == 500
+    assert transfer["routing_status"] == "success"
+    assert transfer["duration_seconds"] == 360
+    assert transfer["geometry"] == "fake_polyline"
+
+    assert journey["metrics"]["transfer_walking_distance_m"] == 500
+    assert journey["metrics"]["transfer_walking_duration_seconds"] == 360
+    assert journey["metrics"]["total_walking_duration_seconds"] == 840
