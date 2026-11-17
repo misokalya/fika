@@ -6,13 +6,21 @@ from geoalchemy2.elements import WKTElement
 from geoalchemy2.shape import to_shape
 
 from app.dependencies import get_db
-from app.models import Stop
+from app.models import Stop, UserRole
 from app.schemas import StopCreate, StopUpdate, StopResponse
+from app.services.auth.dependencies import require_roles
 
 
 router = APIRouter(
     prefix="/api/v1/stops",
     tags=["Stops"]
+)
+
+
+# Only operators and administrators can modify official stop data.
+stop_managers = require_roles(
+    UserRole.OPERATOR,
+    UserRole.ADMIN
 )
 
 
@@ -41,9 +49,10 @@ def stop_to_response(stop: Stop) -> StopResponse:
 )
 def create_stop(
     stop_data: StopCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user=Depends(stop_managers)
 ):
-    """Create a new transport stop."""
+    """Create a new transport stop. Requires operator or admin access."""
 
     stop = Stop(
         name=stop_data.name,
@@ -75,7 +84,7 @@ def list_stops(
     verified_only: bool = False,
     db: Session = Depends(get_db)
 ):
-    """List transport stops with optional filters."""
+    """List transport stops with optional filters. Publicly accessible."""
 
     statement = select(Stop)
 
@@ -100,7 +109,7 @@ def get_stop(
     stop_id: int,
     db: Session = Depends(get_db)
 ):
-    """Retrieve an individual stop."""
+    """Retrieve an individual stop. Publicly accessible."""
 
     stop = db.get(Stop, stop_id)
 
@@ -120,9 +129,10 @@ def get_stop(
 def update_stop(
     stop_id: int,
     stop_data: StopUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user=Depends(stop_managers)
 ):
-    """Update stop information."""
+    """Update stop information. Requires operator or admin access."""
 
     stop = db.get(Stop, stop_id)
 
@@ -157,9 +167,10 @@ def update_stop(
 )
 def deactivate_stop(
     stop_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user=Depends(stop_managers)
 ):
-    """Soft-delete a stop by deactivating it."""
+    """Soft-delete a stop. Requires operator or admin access."""
 
     stop = db.get(Stop, stop_id)
 

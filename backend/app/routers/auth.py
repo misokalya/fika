@@ -18,6 +18,7 @@ from app.services.auth.security import (
 )
 from app.services.auth.tokens import create_access_token
 from app.services.auth.dependencies import get_current_user
+from app.services.auth.dependencies import require_roles
 
 
 router = APIRouter(
@@ -128,3 +129,16 @@ def get_my_profile(
     """Return the authenticated user's profile."""
 
     return current_user
+
+@router.get("/admin-check")
+def admin_access_check(
+    current_user: User = Depends(
+        require_roles(UserRole.ADMIN)
+    ),
+):
+    return {
+        "status": "success",
+        "message": "Administrator access granted.",
+        "user_id": current_user.id,
+        "role": current_user.role,
+    }

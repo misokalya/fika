@@ -6,13 +6,21 @@ from geoalchemy2.elements import WKTElement
 from geoalchemy2.shape import to_shape
 
 from app.dependencies import get_db
-from app.models import Route
+from app.models import Route, UserRole
 from app.schemas import RouteCreate, RouteUpdate, RouteResponse
+from app.services.auth.dependencies import require_roles
 
 
 router = APIRouter(
     prefix="/api/v1/routes",
     tags=["Routes"]
+)
+
+
+# Only operators and administrators can modify official route data.
+route_managers = require_roles(
+    UserRole.OPERATOR,
+    UserRole.ADMIN
 )
 
 
@@ -46,9 +54,10 @@ def route_to_response(route: Route) -> dict:
 )
 def create_route(
     route_data: RouteCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user=Depends(route_managers)
 ):
-    """Create a new public transport route."""
+    """Create a new public transport route. Requires operator or admin access."""
 
     existing_route = db.query(Route).filter(
         Route.code == route_data.code
@@ -97,7 +106,7 @@ def list_routes(
     active_only: bool = True,
     db: Session = Depends(get_db)
 ):
-    """List transport routes."""
+    """List transport routes. Publicly accessible."""
 
     if skip < 0 or limit < 1 or limit > 500:
         raise HTTPException(
@@ -120,7 +129,7 @@ def get_route(
     route_id: int,
     db: Session = Depends(get_db)
 ):
-    """Retrieve a route by its database ID."""
+    """Retrieve a route by its database ID. Publicly accessible."""
 
     route = db.query(Route).filter(Route.id == route_id).first()
 
@@ -137,9 +146,10 @@ def get_route(
 def update_route(
     route_id: int,
     route_data: RouteUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user=Depends(route_managers)
 ):
-    """Update an existing route."""
+    """Update an existing route. Requires operator or admin access."""
 
     route = db.query(Route).filter(Route.id == route_id).first()
 
@@ -199,13 +209,13 @@ def update_route(
 @router.delete("/{route_id}")
 def deactivate_route(
     route_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user=Depends(route_managers)
 ):
     """
     Deactivate a route instead of permanently deleting it.
 
-    This preserves historical records and avoids breaking
-    relationships with stops, fares and journey observations.
+    Requires operator or admin access. Historical records are preserved.
     """
 
     route = db.query(Route).filter(Route.id == route_id).first()

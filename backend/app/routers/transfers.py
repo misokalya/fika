@@ -3,19 +3,25 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.database import SessionLocal
 from app.dependencies import get_db
-from app.models import Route, Stop, RouteStop, Transfer
+from app.models import Route, Stop, RouteStop, Transfer, UserRole
 from app.schemas import (
     TransferCreate,
     TransferUpdate,
     TransferResponse,
 )
+from app.services.auth.dependencies import require_roles
 
 
 router = APIRouter(
     prefix="/api/v1/transfers",
     tags=["Transfers"],
+)
+
+
+transfer_managers = require_roles(
+    UserRole.OPERATOR,
+    UserRole.ADMIN,
 )
 
 
@@ -105,6 +111,7 @@ def validate_transfer_relationships(
 def create_transfer(
     transfer_data: TransferCreate,
     db: Session = Depends(get_db),
+    current_user=Depends(transfer_managers),
 ):
     validate_transfer_relationships(
         db,
@@ -194,6 +201,7 @@ def update_transfer(
     transfer_id: int,
     transfer_data: TransferUpdate,
     db: Session = Depends(get_db),
+    current_user=Depends(transfer_managers),
 ):
     transfer = db.get(Transfer, transfer_id)
 
@@ -257,6 +265,7 @@ def update_transfer(
 def delete_transfer(
     transfer_id: int,
     db: Session = Depends(get_db),
+    current_user=Depends(transfer_managers),
 ):
     transfer = db.get(Transfer, transfer_id)
 

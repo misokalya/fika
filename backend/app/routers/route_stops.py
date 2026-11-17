@@ -5,17 +5,25 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.dependencies import get_db
-from app.models import Route, Stop, RouteStop
+from app.models import Route, Stop, RouteStop, UserRole
 from app.schemas import (
     RouteStopCreate,
     RouteStopUpdate,
     RouteStopResponse,
 )
+from app.services.auth.dependencies import require_roles
 
 
 router = APIRouter(
     prefix="/api/v1",
     tags=["Route Stops"]
+)
+
+
+# Only operators and administrators can manage route-stop assignments.
+route_stop_managers = require_roles(
+    UserRole.OPERATOR,
+    UserRole.ADMIN
 )
 
 
@@ -98,9 +106,10 @@ def renumber_route_stops(
 def assign_stop_to_route(
     route_id: int,
     assignment_data: RouteStopCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user=Depends(route_stop_managers)
 ):
-    """Assign an active stop to an active route at a given position."""
+    """Assign an active stop to an active route. Requires operator or admin access."""
 
     get_active_route(db, route_id)
     get_active_stop(db, assignment_data.stop_id)
@@ -178,7 +187,7 @@ def list_route_stops(
     route_id: int,
     db: Session = Depends(get_db)
 ):
-    """Retrieve all stop assignments in route order."""
+    """Retrieve all stop assignments in route order. Publicly accessible."""
 
     route = db.get(Route, route_id)
 
@@ -203,7 +212,7 @@ def get_route_stop(
     route_stop_id: int,
     db: Session = Depends(get_db)
 ):
-    """Retrieve an individual route-stop assignment."""
+    """Retrieve an individual route-stop assignment. Publicly accessible."""
 
     assignment = db.get(RouteStop, route_stop_id)
 
@@ -223,9 +232,10 @@ def get_route_stop(
 def update_route_stop(
     route_stop_id: int,
     update_data: RouteStopUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user=Depends(route_stop_managers)
 ):
-    """Update destination-board text or move a stop to another position."""
+    """Update a route-stop assignment. Requires operator or admin access."""
 
     assignment = db.get(RouteStop, route_stop_id)
 
@@ -299,9 +309,10 @@ def update_route_stop(
 @router.delete("/route-stops/{route_stop_id}")
 def remove_stop_from_route(
     route_stop_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user=Depends(route_stop_managers)
 ):
-    """Remove a stop assignment without deleting the route or stop."""
+    """Remove a stop assignment. Requires operator or admin access."""
 
     assignment = db.get(RouteStop, route_stop_id)
 
