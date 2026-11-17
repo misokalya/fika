@@ -193,6 +193,16 @@ class JourneyObservation(Base):
         ForeignKey("routes.id", ondelete="CASCADE")
     )
 
+    from_stop_id: Mapped[int | None] = mapped_column(
+        ForeignKey("stops.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+
+    to_stop_id: Mapped[int | None] = mapped_column(
+        ForeignKey("stops.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+
     departure_time: Mapped[datetime] = mapped_column(
         DateTime(timezone=True)
     )
@@ -209,13 +219,33 @@ class JourneyObservation(Base):
         nullable=True,
     )
 
-    source: Mapped[str] = mapped_column(String(50), default="field")
-    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source: Mapped[str] = mapped_column(
+        String(50),
+        default="field",
+    )
+
+    is_verified: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default="false",
+    )
+
+    notes: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
 
     __table_args__ = (
         CheckConstraint("duration_seconds > 0"),
         CheckConstraint("wait_seconds IS NULL OR wait_seconds >= 0"),
         CheckConstraint("weekday IS NULL OR weekday BETWEEN 0 AND 6"),
+        CheckConstraint(
+            "(from_stop_id IS NULL AND to_stop_id IS NULL) "
+            "OR (from_stop_id IS NOT NULL AND to_stop_id IS NOT NULL)"
+        ),
+        CheckConstraint(
+            "from_stop_id IS NULL OR from_stop_id <> to_stop_id"
+        ),
     )
 
 

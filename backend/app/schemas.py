@@ -275,3 +275,21 @@ class CoordinateJourneyPlanRequest(BaseSchema):
     radius_m: float = Field(default=2000, gt=0, le=5000)
     candidate_limit: int = Field(default=10, ge=1, le=50)
     include_unverified_transfers: bool = False
+
+class JourneyObservationCreate(BaseSchema):
+    route_id: int = Field(gt=0)
+    from_stop_id: int = Field(gt=0)
+    to_stop_id: int = Field(gt=0)
+
+    departure_time: datetime
+
+    duration_seconds: int = Field(gt=0)
+    wait_seconds: int | None = Field(default=None, ge=0)
+
+    notes: str | None = None
+
+    @model_validator(mode="after")
+    def validate_different_stops(self):
+        if self.from_stop_id == self.to_stop_id:
+            raise ValueError("Starting and ending stops must be different.")
+        return self
