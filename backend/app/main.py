@@ -2,11 +2,14 @@ from fastapi import FastAPI
 from datetime import datetime, timezone
 from sqlalchemy import text
 from app.database import engine
-from app.routers import routes
-from app.routers import stops
-from app.routers import route_stops
-from app.routers import transfers
-from app.routers import journeys
+from app.routers import (
+    routes,
+    stops,
+    route_stops,
+    transfers,
+    journeys,
+    auth,
+)
 
 app = FastAPI(
     title="FIKA API",
@@ -19,6 +22,7 @@ app.include_router(stops.router)
 app.include_router(route_stops.router)
 app.include_router(transfers.router)
 app.include_router(journeys.router)
+app.include_router(auth.router)
 
 @app.get("/")
 def root():

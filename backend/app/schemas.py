@@ -1,18 +1,15 @@
-
 from datetime import datetime
+import re
+from typing import Annotated, Any
 
 from pydantic import (
     BaseModel,
     ConfigDict,
+    EmailStr,
     Field,
     field_validator,
     model_validator,
 )
-
-from typing import Annotated, Any
-
-from pydantic import EmailStr
-import re
 
 # --------------------------------------------------
 # Shared configuration
@@ -326,6 +323,11 @@ class UserRegister(BaseModel):
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        return value.strip().lower()
 
 
 class UserResponse(BaseModel):
