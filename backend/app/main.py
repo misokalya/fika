@@ -11,6 +11,15 @@ from app.routers import (
     auth,
 )
 from app.routers import audit_logs
+from app.routers import (
+    routes,
+    stops,
+    route_stops,
+    transfers,
+    journeys,
+    auth,
+    fares,
+)
 
 app = FastAPI(
     title="FIKA API",
@@ -25,6 +34,7 @@ app.include_router(transfers.router)
 app.include_router(journeys.router)
 app.include_router(auth.router)
 app.include_router(audit_logs.router)
+app.include_router(fares.router)
 
 @app.get("/")
 def root():

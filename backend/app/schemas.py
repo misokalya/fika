@@ -292,6 +292,80 @@ class JourneyObservationCreate(BaseSchema):
             raise ValueError("Starting and ending stops must be different.")
         return self
 
+# --------------------------------------------------
+# FARE SCHEMAS
+# --------------------------------------------------
+
+class FareCreate(BaseSchema):
+    route_id: int = Field(gt=0)
+    amount_tzs: float = Field(gt=0, allow_inf_nan=False)
+
+    effective_from: datetime
+    effective_until: datetime | None = None
+
+    @field_validator("effective_from", "effective_until")
+    @classmethod
+    def validate_timezone_awareness(cls, value):
+        if value is not None:
+            if value.tzinfo is None or value.utcoffset() is None:
+                raise ValueError(
+                    "Fare dates must include timezone information."
+                )
+        return value
+
+    @model_validator(mode="after")
+    def validate_effective_period(self):
+        if (
+            self.effective_until is not None
+            and self.effective_until <= self.effective_from
+        ):
+            raise ValueError(
+                "effective_until must be later than effective_from."
+            )
+        return self
+
+
+class FareUpdate(BaseSchema):
+    amount_tzs: float | None = Field(
+        default=None,
+        gt=0,
+        allow_inf_nan=False,
+    )
+
+    effective_from: datetime | None = None
+    effective_until: datetime | None = None
+
+    @field_validator("effective_from", "effective_until")
+    @classmethod
+    def validate_timezone_awareness(cls, value):
+        if value is not None:
+            if value.tzinfo is None or value.utcoffset() is None:
+                raise ValueError(
+                    "Fare dates must include timezone information."
+                )
+        return value
+
+    @model_validator(mode="after")
+    def validate_effective_period(self):
+        if (
+            self.effective_from is not None
+            and self.effective_until is not None
+            and self.effective_until <= self.effective_from
+        ):
+            raise ValueError(
+                "effective_until must be later than effective_from."
+            )
+        return self
+
+
+class FareResponse(BaseSchema):
+    id: int
+    route_id: int
+    amount_tzs: float
+    effective_from: datetime
+    effective_until: datetime | None
+    is_verified: bool
+
 
 from pydantic import EmailStr, Field, field_validator
 import re
