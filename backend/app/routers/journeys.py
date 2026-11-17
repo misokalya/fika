@@ -8,6 +8,7 @@ from app.models import (
     Route,
     RouteStop,
     Stop,
+    UserRole,
 )
 from app.schemas import (
     JourneyPlanRequest,
@@ -16,6 +17,7 @@ from app.schemas import (
     JourneyObservationCreate,
 )
 
+from app.services.auth.dependencies import require_roles
 from app.services.transit.graph import build_transit_graph
 from app.services.transit.pathfinder import (
     find_transit_path,
@@ -28,6 +30,13 @@ from app.services.journey.planner import plan_coordinate_journey
 router = APIRouter(
     prefix="/api/v1/journeys",
     tags=["Journeys"],
+)
+
+
+observation_submitters = require_roles(
+    UserRole.FIELD_RESEARCHER,
+    UserRole.OPERATOR,
+    UserRole.ADMIN,
 )
 
 
@@ -133,6 +142,7 @@ async def plan_coordinates(
 def create_journey_observation(
     request: JourneyObservationCreate,
     db: Session = Depends(get_db),
+    current_user=Depends(observation_submitters),
 ):
     # Confirm that the route exists and is active.
     route = db.get(Route, request.route_id)
