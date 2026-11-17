@@ -258,13 +258,10 @@ async def plan_coordinate_journey(
                         transfer_route["duration_seconds"]
                     )
 
-                    # A zero-distance route between distinct
-                    # transfer records may indicate inaccurate
-                    # or identical stop coordinates.
-                    if (
-                        routed_distance_m <= 0
-                        and recorded_distance > 0
-                    ):
+                    # A zero-distance route between distinct transfer stops
+                    # is treated as a coordinate mismatch, regardless of
+                    # whether a recorded distance is available.
+                    if routed_distance_m <= 0:
                         effective_distance_m = recorded_distance
                         effective_duration_seconds = None
                         routing_status = "coordinate_mismatch"
@@ -272,16 +269,8 @@ async def plan_coordinate_journey(
                         all_transfers_routed = False
 
                     else:
-                        effective_distance_m = (
-                            routed_distance_m
-                            if routed_distance_m > 0
-                            else recorded_distance
-                        )
-
-                        effective_duration_seconds = (
-                            routed_duration_seconds
-                        )
-
+                        effective_distance_m = routed_distance_m
+                        effective_duration_seconds = routed_duration_seconds
                         routing_status = "success"
 
                     transfer_walking_distance_m += (

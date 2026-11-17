@@ -1064,3 +1064,303 @@ async def test_multiple_journeys_are_ranked_by_walking_duration(
         result["journeys"][1]["metrics"]["total_walking_duration_seconds"]
         == 660
     )
+
+
+@pytest.mark.anyio
+async def test_multiple_transfers_with_one_routing_failure(
+    monkeypatch,
+    sample_stops,
+):
+    boarding, alighting = sample_stops
+
+    async def fake_access_routes(**kwargs):
+        return [boarding]
+
+    def fake_nearby_stops(**kwargs):
+        return [alighting]
+
+    def fake_build_graph(db, verified_transfers_only=True):
+        graph = nx.MultiDiGraph()
+
+        graph.add_node(1, longitude=36.8219, latitude=-3.3869)
+        graph.add_node(2, longitude=36.823, latitude=-3.388)
+        graph.add_node(3, longitude=36.824, latitude=-3.389)
+        graph.add_node(4, longitude=36.825, latitude=-3.390)
+        graph.add_node(5, longitude=36.826, latitude=-3.391)
+
+        return graph
+
+    def fake_find_path(graph, origin_id, destination_id):
+        return {
+            "origin_stop_id": origin_id,
+            "destination_stop_id": destination_id,
+            "stops": [1, 2, 3, 4, 5],
+            "connections": [
+                {
+                    "kind": "ride",
+                    "from_stop_id": 1,
+                    "to_stop_id": 2,
+                    "route_id": 1,
+                },
+                {
+                    "kind": "transfer",
+                    "from_stop_id": 2,
+                    "to_stop_id": 3,
+                    "transfer_id": 101,
+                    "walking_distance_m": 150,
+                },
+                {
+                    "kind": "ride",
+                    "from_stop_id": 3,
+                    "to_stop_id": 4,
+                    "route_id": 2,
+                },
+                {
+                    "kind": "transfer",
+                    "from_stop_id": 4,
+                    "to_stop_id": 5,
+                    "transfer_id": 102,
+                    "walking_distance_m": 250,
+                },
+            ],
+            "total_connections": 4,
+            "ride_connections": 2,
+            "transfer_connections": 2,
+        }
+
+    class PartialTransferFailureProvider:
+        def __init__(self):
+            self.call_count = 0
+
+        async def get_route(self, origin, destination, costing):
+            self.call_count += 1
+
+            # Call 1: egress succeeds.
+            # Call 2: first transfer succeeds.
+            if self.call_count <= 2:
+                return {
+                    "distance_km": 0.5,
+                    "duration_seconds": 360,
+                    "duration_minutes": 6,
+                    "geometry": f"route_{self.call_count}",
+                }
+
+            # Call 3: second transfer fails.
+            raise planner.ValhallaRoutingError(
+                "Simulated failure on second transfer"
+            )
+
+    monkeypatch.setattr(
+        planner,
+        "find_walking_access_routes",
+        fake_access_routes,
+    )
+    monkeypatch.setattr(
+        planner,
+        "find_nearby_stops",
+        fake_nearby_stops,
+    )
+    monkeypatch.setattr(
+        planner,
+        "build_transit_graph",
+        fake_build_graph,
+    )
+    monkeypatch.setattr(
+        planner,
+        "find_transit_path",
+        fake_find_path,
+    )
+    monkeypatch.setattr(
+        planner,
+        "generate_journey_instructions",
+        lambda graph, path: {"steps": []},
+    )
+    monkeypatch.setattr(
+        planner,
+        "ValhallaProvider",
+        PartialTransferFailureProvider,
+    )
+
+    result = await planner.plan_coordinate_journey(
+        db=None,
+        origin=(36.8219, -3.3869),
+        destination=(36.825, -3.390),
+        include_unverified_transfers=True,
+    )
+
+    assert result["status"] == "success"
+    assert result["total_journeys"] == 1
+
+    journey = result["journeys"][0]
+    transfers = journey["transfer_walks"]
+
+    assert len(transfers) == 2
+
+    first_transfer = transfers[0]
+    second_transfer = transfers[1]
+
+    # First transfer routed successfully.
+    assert first_transfer["transfer_id"] == 101
+    assert first_transfer["recorded_distance_m"] == 150
+    assert first_transfer["routed_distance_m"] == 500
+    assert first_transfer["effective_distance_m"] == 500
+    assert first_transfer["routing_status"] == "success"
+    assert first_transfer["duration_seconds"] == 360
+
+    # Second transfer failed and retains its recorded estimate.
+    assert second_transfer["transfer_id"] == 102
+    assert second_transfer["recorded_distance_m"] == 250
+    assert second_transfer["routed_distance_m"] is None
+    assert second_transfer["effective_distance_m"] == 250
+    assert second_transfer["routing_status"] == "unavailable"
+    assert second_transfer["duration_seconds"] is None
+
+    # Distance remains available using routed + recorded distances.
+    assert journey["metrics"]["transfer_walking_distance_m"] == 750
+
+    # Aggregate transfer duration is unknown because one transfer failed.
+    assert (
+        journey["metrics"]["transfer_walking_duration_seconds"]
+        is None
+    )
+
+    # Total walking duration must also remain unknown.
+    assert (
+        journey["metrics"]["total_walking_duration_seconds"]
+        is None
+    )
+
+    # Total duration must remain unknown because one transfer failed.
+    assert (
+        journey["metrics"]["total_walking_duration_seconds"]
+        is None
+    )
+
+
+@pytest.mark.anyio
+async def test_zero_distance_transfer_without_recorded_distance(
+    monkeypatch,
+    sample_stops,
+):
+    boarding, alighting = sample_stops
+
+    async def fake_access_routes(**kwargs):
+        return [boarding]
+
+    def fake_nearby_stops(**kwargs):
+        return [alighting]
+
+    def fake_build_graph(db, verified_transfers_only=True):
+        graph = nx.MultiDiGraph()
+
+        graph.add_node(1, longitude=36.8219, latitude=-3.3869)
+        graph.add_node(2, longitude=36.824, latitude=-3.389)
+        graph.add_node(3, longitude=36.825, latitude=-3.390)
+
+        return graph
+
+    def fake_find_path(graph, origin_id, destination_id):
+        return {
+            "origin_stop_id": origin_id,
+            "destination_stop_id": destination_id,
+            "stops": [1, 2, 3],
+            "connections": [
+                {
+                    "kind": "ride",
+                    "from_stop_id": 1,
+                    "to_stop_id": 2,
+                },
+                {
+                    "kind": "transfer",
+                    "from_stop_id": 2,
+                    "to_stop_id": 3,
+                    "transfer_id": 103,
+                    "walking_distance_m": None,
+                },
+            ],
+            "total_connections": 2,
+            "ride_connections": 1,
+            "transfer_connections": 1,
+        }
+
+    class ZeroDistanceProvider:
+        def __init__(self):
+            self.call_count = 0
+
+        async def get_route(self, origin, destination, costing):
+            self.call_count += 1
+
+            # First call is the egress route.
+            if self.call_count == 1:
+                return {
+                    "distance_km": 0.5,
+                    "duration_seconds": 360,
+                    "duration_minutes": 6,
+                    "geometry": "egress_polyline",
+                }
+
+            # Second call is the transfer route.
+            return {
+                "distance_km": 0,
+                "duration_seconds": 0,
+                "duration_minutes": 0,
+                "geometry": None,
+            }
+
+    monkeypatch.setattr(
+        planner,
+        "find_walking_access_routes",
+        fake_access_routes,
+    )
+    monkeypatch.setattr(
+        planner,
+        "find_nearby_stops",
+        fake_nearby_stops,
+    )
+    monkeypatch.setattr(
+        planner,
+        "build_transit_graph",
+        fake_build_graph,
+    )
+    monkeypatch.setattr(
+        planner,
+        "find_transit_path",
+        fake_find_path,
+    )
+    monkeypatch.setattr(
+        planner,
+        "generate_journey_instructions",
+        lambda graph, path: {"steps": []},
+    )
+    monkeypatch.setattr(
+        planner,
+        "ValhallaProvider",
+        ZeroDistanceProvider,
+    )
+
+    result = await planner.plan_coordinate_journey(
+        db=None,
+        origin=(36.8219, -3.3869),
+        destination=(36.825, -3.390),
+        include_unverified_transfers=True,
+    )
+
+    assert result["status"] == "success"
+
+    journey = result["journeys"][0]
+    transfer = journey["transfer_walks"][0]
+
+    assert transfer["transfer_id"] == 103
+    assert transfer["recorded_distance_m"] == 0
+    assert transfer["routed_distance_m"] == 0
+    assert transfer["effective_distance_m"] == 0
+
+    # Zero distance between distinct transfer stops is unresolved.
+    assert transfer["routing_status"] == "coordinate_mismatch"
+    assert transfer["duration_seconds"] is None
+
+    # FIKA must not claim a complete walking-duration estimate.
+    assert (
+        journey["metrics"]["total_walking_duration_seconds"]
+        is None
+    )
