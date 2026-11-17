@@ -1,6 +1,5 @@
 
 from datetime import datetime
-from typing import Annotated
 
 from pydantic import (
     BaseModel,
@@ -293,3 +292,50 @@ class JourneyObservationCreate(BaseSchema):
         if self.from_stop_id == self.to_stop_id:
             raise ValueError("Starting and ending stops must be different.")
         return self
+
+
+from pydantic import EmailStr, Field, field_validator
+import re
+
+
+class UserRegister(BaseModel):
+    username: str = Field(min_length=3, max_length=50)
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=128)
+
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, value: str) -> str:
+        value = value.strip().lower()
+
+        if not re.fullmatch(r"[a-z0-9_]+", value):
+            raise ValueError(
+                "Username may only contain letters, numbers, and underscores."
+            )
+
+        return value
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        return value.strip().lower()
+
+
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class UserResponse(BaseModel):
+    id: int
+    username: str
+    email: str
+    role: str
+    is_active: bool
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"

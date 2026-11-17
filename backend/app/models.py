@@ -18,11 +18,67 @@ from sqlalchemy.orm import Mapped, mapped_column
 from geoalchemy2 import Geometry
 
 from app.database import Base
+from enum import Enum
 
 
 def utc_now():
     return datetime.now(timezone.utc)
 
+class UserRole(str, Enum):
+    PASSENGER = "passenger"
+    FIELD_RESEARCHER = "field_researcher"
+    OPERATOR = "operator"
+    ADMIN = "admin"
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    username: Mapped[str] = mapped_column(
+        String(50),
+        unique=True,
+        index=True,
+    )
+
+    email: Mapped[str] = mapped_column(
+        String(255),
+        unique=True,
+        index=True,
+    )
+
+    password_hash: Mapped[str] = mapped_column(String(255))
+
+    role: Mapped[str] = mapped_column(
+        String(30),
+        default=UserRole.PASSENGER.value,
+        server_default="passenger",
+    )
+
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        server_default="true",
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        onupdate=utc_now,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "role IN ('passenger', 'field_researcher', 'operator', 'admin')",
+            name="ck_users_valid_role",
+        ),
+    )
 
 class Route(Base):
     __tablename__ = "routes"

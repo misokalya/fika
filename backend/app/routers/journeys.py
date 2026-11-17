@@ -3,8 +3,18 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.dependencies import get_db
-from app.models import Stop
-from app.schemas import JourneyPlanRequest, JourneyPlanResponse
+from app.models import (
+    JourneyObservation,
+    Route,
+    RouteStop,
+    Stop,
+)
+from app.schemas import (
+    JourneyPlanRequest,
+    JourneyPlanResponse,
+    CoordinateJourneyPlanRequest,
+    JourneyObservationCreate,
+)
 
 from app.services.transit.graph import build_transit_graph
 from app.services.transit.pathfinder import (
@@ -13,11 +23,6 @@ from app.services.transit.pathfinder import (
 )
 from app.services.transit.instructions import generate_journey_instructions
 from app.services.journey.planner import plan_coordinate_journey
-from app.schemas import (
-    JourneyPlanRequest,
-    JourneyPlanResponse,
-    CoordinateJourneyPlanRequest,
-)
 
 
 router = APIRouter(
@@ -122,3 +127,113 @@ async def plan_coordinates(
     )
 
     return result
+
+
+@router.post("/observations", status_code=201)
+def create_journey_observation(
+    request: JourneyObservationCreate,
+    db: Session = Depends(get_db),
+):
+    # Confirm that the route exists and is active.
+    route = db.get(Route, request.route_id)
+
+    if route is None or not route.is_active:
+        raise HTTPException(
+            status_code=404,
+            detail="Route not found or inactive.",
+        )
+
+    # Confirm that both stops exist and are active.
+    from_stop = db.get(Stop, request.from_stop_id)
+    to_stop = db.get(Stop, request.to_stop_id)
+
+    if from_stop is None or not from_stop.is_active:
+        raise HTTPException(
+            status_code=404,
+            detail="Starting stop not found or inactive.",
+        )
+
+    if to_stop is None or not to_stop.is_active:
+        raise HTTPException(
+            status_code=404,
+            detail="Ending stop not found or inactive.",
+        )
+
+    # Retrieve the positions of both stops on this route.
+    route_stops = (
+        db.query(RouteStop)
+        .filter(
+            RouteStop.route_id == request.route_id,
+            RouteStop.stop_id.in_([
+                request.from_stop_id,
+                request.to_stop_id,
+            ]),
+        )
+        .all()
+    )
+
+    stop_sequences = {
+        route_stop.stop_id: route_stop.sequence
+        for route_stop in route_stops
+    }
+
+    if request.from_stop_id not in stop_sequences:
+        raise HTTPException(
+            status_code=422,
+            detail="Starting stop does not belong to the selected route.",
+        )
+
+    if request.to_stop_id not in stop_sequences:
+        raise HTTPException(
+            status_code=422,
+            detail="Ending stop does not belong to the selected route.",
+        )
+
+    if (
+        stop_sequences[request.from_stop_id]
+        >= stop_sequences[request.to_stop_id]
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Starting stop must occur before ending stop on the selected route.",
+        )
+
+    # Create an unverified field observation.
+    observation = JourneyObservation(
+        route_id=request.route_id,
+        from_stop_id=request.from_stop_id,
+        to_stop_id=request.to_stop_id,
+        departure_time=request.departure_time,
+        duration_seconds=request.duration_seconds,
+        wait_seconds=request.wait_seconds,
+        weekday=request.departure_time.weekday(),
+        source="field",
+        is_verified=False,
+        notes=request.notes,
+    )
+
+    try:
+        db.add(observation)
+        db.commit()
+        db.refresh(observation)
+    except Exception:
+        db.rollback()
+        raise
+
+    return {
+        "status": "success",
+        "message": "Journey observation recorded successfully.",
+        "observation": {
+            "id": observation.id,
+            "route_id": observation.route_id,
+            "from_stop_id": observation.from_stop_id,
+            "to_stop_id": observation.to_stop_id,
+            "departure_time": observation.departure_time,
+            "duration_seconds": observation.duration_seconds,
+            "wait_seconds": observation.wait_seconds,
+            "weekday": observation.weekday,
+            "source": observation.source,
+            "is_verified": observation.is_verified,
+            "notes": observation.notes,
+        },
+    }
