@@ -11,6 +11,8 @@ from pydantic import (
 
 from typing import Annotated, Any
 
+from pydantic import EmailStr
+import re
 
 # --------------------------------------------------
 # Shared configuration
