@@ -21,6 +21,7 @@ from app.routers import (
     fares,
 )
 
+
 app = FastAPI(
     title="FIKA API",
     description="Intelligent Multimodal Route Navigation System for Tanzania",

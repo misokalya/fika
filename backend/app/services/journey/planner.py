@@ -3,6 +3,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.services.fares.dala_dala import get_effective_route_fare
 from app.services.journey.access import find_walking_access_routes
 from app.services.journey.nearby_stops import find_nearby_stops
 from app.services.journey.ranking import rank_journeys
@@ -21,6 +22,133 @@ from app.services.transit.instructions import (
 )
 
 
+def estimate_transit_fare(
+    db: Session,
+    path_result: dict,
+) -> dict[str, Any]:
+    """
+    Estimate the total dala-dala fare for a transit path.
+
+    A continuous ride on the same route is charged once.
+    A transfer starts a new fare leg, even if the passenger
+    later boards the same route again.
+
+    Only currently effective, verified fares are used.
+
+    If any route leg has no verified effective fare, the
+    overall fare is returned as None to avoid presenting
+    an incomplete total.
+    """
+
+    fare_breakdown = []
+    total_fare = 0.0
+    all_fares_available = True
+
+    fare_cache = {}
+
+    # Use a unique sentinel so that None remains a valid
+    # value to detect and report a missing route ID.
+    no_active_leg = object()
+    current_leg_route_id = no_active_leg
+    current_leg_route_code = None
+    current_leg_route_name = None
+
+    def add_fare_leg(
+        route_id: int | None,
+        route_code: str | None = None,
+        route_name: str | None = None,
+    ) -> None:
+        nonlocal total_fare, all_fares_available
+
+        if route_id is None:
+            fare_breakdown.append({
+                "route_id": None,
+                "route_code": route_code,
+                "route_name": route_name,
+                "fare_id": None,
+                "fare_tzs": None,
+                "status": "route_id_missing",
+            })
+
+            all_fares_available = False
+            return
+
+        if route_id not in fare_cache:
+            if db is None:
+                fare_cache[route_id] = None
+            else:
+                fare_cache[route_id] = get_effective_route_fare(
+                    db=db,
+                    route_id=route_id,
+                    verified_only=True,
+                )
+
+        fare = fare_cache[route_id]
+
+        if fare is None:
+            fare_breakdown.append({
+                "route_id": route_id,
+                "route_code": route_code,
+                "route_name": route_name,
+                "fare_id": None,
+                "fare_tzs": None,
+                "status": "verified_fare_unavailable",
+            })
+
+            all_fares_available = False
+            return
+
+        amount = float(fare.amount_tzs)
+        total_fare += amount
+
+        fare_breakdown.append({
+            "route_id": route_id,
+            "route_code": route_code,
+            "route_name": route_name,
+            "fare_id": fare.id,
+            "fare_tzs": amount,
+            "status": "estimated",
+        })
+
+    for connection in path_result["connections"]:
+
+        if connection["kind"] == "transfer":
+            # A transfer ends the current fare leg.
+            current_leg_route_id = no_active_leg
+            current_leg_route_code = None
+            current_leg_route_name = None
+            continue
+
+        if connection["kind"] != "ride":
+            continue
+
+        route_id = connection.get("route_id")
+        route_code = connection.get("route_code")
+        route_name = connection.get("route_name")
+
+        # Charge once when beginning a new route leg.
+        if route_id != current_leg_route_id:
+            add_fare_leg(
+                route_id=route_id,
+                route_code=route_code,
+                route_name=route_name,
+            )
+
+        current_leg_route_id = route_id
+        current_leg_route_code = route_code
+        current_leg_route_name = route_name
+
+    return {
+        "fare_tzs": (
+            round(total_fare, 2)
+            if all_fares_available
+            else None
+        ),
+        "fare_breakdown": fare_breakdown,
+        "fare_estimate_available": all_fares_available,
+    }
+
+
 async def plan_coordinate_journey(
     db: Session,
     origin: tuple[float, float],
@@ -37,7 +165,10 @@ async def plan_coordinate_journey(
     Access, egress and transfer walking routes use Valhalla.
     Recorded transfer distances are preserved as fallback values.
 
-    Transit duration and fare are not yet estimated.
+    Transit fares use currently effective, verified route-level
+    fares. Each continuous route leg is charged once.
+
+    Transit duration is not yet estimated.
     """
 
     origin_lon, origin_lat = origin
@@ -193,7 +324,16 @@ async def plan_coordinate_journey(
             )
 
             # --------------------------------------------------
-            # 6. Calculate access and egress walking metrics
+            # 6. Estimate transit fare
+            # --------------------------------------------------
+
+            fare_estimate = estimate_transit_fare(
+                db=db,
+                path_result=path_result,
+            )
+
+            # --------------------------------------------------
+            # 7. Calculate access and egress walking metrics
             # --------------------------------------------------
 
             access_seconds = boarding_stop[
@@ -213,7 +353,7 @@ async def plan_coordinate_journey(
             )
 
             # --------------------------------------------------
-            # 7. Calculate pedestrian routes between transfers
+            # 8. Calculate pedestrian routes between transfers
             # --------------------------------------------------
 
             transfer_walking_distance_m = 0.0
@@ -270,7 +410,9 @@ async def plan_coordinate_journey(
 
                     else:
                         effective_distance_m = routed_distance_m
-                        effective_duration_seconds = routed_duration_seconds
+                        effective_duration_seconds = (
+                            routed_duration_seconds
+                        )
                         routing_status = "success"
 
                     transfer_walking_distance_m += (
@@ -322,7 +464,7 @@ async def plan_coordinate_journey(
                     })
 
             # --------------------------------------------------
-            # 8. Calculate complete walking metrics
+            # 9. Calculate complete walking metrics
             # --------------------------------------------------
 
             total_walking_distance_m = (
@@ -342,7 +484,7 @@ async def plan_coordinate_journey(
             )
 
             # --------------------------------------------------
-            # 9. Assemble journey result
+            # 10. Assemble journey result
             # --------------------------------------------------
 
             journeys.append({
@@ -373,7 +515,11 @@ async def plan_coordinate_journey(
                     "path": path_result,
                     "instructions": instructions,
                     "duration_seconds": None,
-                    "fare_tzs": None,
+                    "fare_tzs": fare_estimate["fare_tzs"],
+                    "fare_breakdown": fare_estimate["fare_breakdown"],
+                    "fare_estimate_available": (
+                        fare_estimate["fare_estimate_available"]
+                    ),
                 },
 
                 "transfer_walks": transfer_walks,
@@ -432,7 +578,7 @@ async def plan_coordinate_journey(
             })
 
     # --------------------------------------------------
-    # 10. Rank candidate journeys
+    # 11. Rank candidate journeys
     # --------------------------------------------------
 
     ranked_journeys = rank_journeys(journeys)
@@ -448,7 +594,7 @@ async def plan_coordinate_journey(
         }
 
     # --------------------------------------------------
-    # 11. Return final journey-planning response
+    # 12. Return final journey-planning response
     # --------------------------------------------------
 
     return {
@@ -483,8 +629,15 @@ async def plan_coordinate_journey(
                 "Routed transfer distance is used when available. "
                 "Recorded distance is used as a fallback."
             ),
-            "transit_duration": "Not yet estimated.",
-            "fare": "Not yet estimated.",
+            "transit_duration": (
+                "Not yet estimated."
+            ),
+            "fare": (
+                "Route-level fare estimates use currently effective, "
+                "verified fares. Each continuous route leg is charged "
+                "once. If a verified fare is unavailable for any leg, "
+                "the total fare estimate is returned as null."
+            ),
         },
 
         "total_journeys": len(ranked_journeys),
